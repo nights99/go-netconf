@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 )
 
 const (
@@ -125,7 +126,37 @@ func (t *transportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 
 	pos := 0
 	for {
-		n, err := t.Read(buf[pos : pos+(len(buf)/2)])
+		var n, n1 int
+		var err error
+		if t.version == "v1.1" {
+			var chunkSize int
+
+			n1, err = io.ReadAtLeast(t.ReadWriteCloser, buf[pos:pos+10], len(msgSeperator_v11))
+
+			if n1 == len(msgSeperator_v11) {
+				n = n1
+			} else {
+				_, err = fmt.Sscanf(string(buf[pos:pos+10]), "\n#%d\n", &chunkSize)
+				if err != nil {
+					fmt.Printf("Foo: %d, %s", n1, string(buf[pos:pos+10]))
+					panic(err)
+				}
+				numDigits := len(strconv.Itoa(chunkSize))
+				var extraChars = 10 - numDigits - 3
+				copy(buf[pos:], buf[pos+numDigits+3:pos+10])
+				pos = pos + extraChars
+
+				n, err = io.ReadFull(t.ReadWriteCloser, buf[pos:pos+chunkSize-extraChars])
+
+				if n < chunkSize-extraChars {
+					fmt.Printf("Not enough characters: %d %d pos: %d, err: %v\n", n, chunkSize-extraChars, pos, err)
+					panic("Not enough characters")
+				}
+			}
+		} else {
+			n, err = t.Read(buf[pos : pos+(len(buf)/2)])
+		}
+
 		if err != nil {
 			if err != io.EOF {
 				return nil, err
