@@ -146,6 +146,9 @@ func (t *transportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 				copy(buf[pos:], buf[pos+numDigits+3:pos+10])
 				pos = pos + extraChars
 
+				if pos+chunkSize-extraChars > cap(buf) {
+					buf = append(buf, make([]byte, pos+chunkSize-extraChars)...)
+				}
 				n, err = io.ReadFull(t.ReadWriteCloser, buf[pos:pos+chunkSize-extraChars])
 
 				if n < chunkSize-extraChars {
