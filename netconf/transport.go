@@ -133,9 +133,18 @@ func (t *transportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 
 			n1, err = io.ReadAtLeast(t.ReadWriteCloser, buf[pos:pos+10], len(msgSeperator_v11))
 
-			if n1 == len(msgSeperator_v11) {
+			// @@@ If we do this check here, not much point in checking again by calling f()!
+			if n1 == len(msgSeperator_v11) && string(buf[pos:pos+n1]) == msgSeperator_v11 {
 				n = n1
 			} else {
+				if n1 < 10 {
+					// Read the rest
+					n2, err := io.ReadFull(t.ReadWriteCloser, buf[pos+n1:pos+10])
+					if err != nil || n1+n2 != 10 {
+						panic(true)
+					}
+					n1 = 10
+				}
 				_, err = fmt.Sscanf(string(buf[pos:pos+10]), "\n#%d\n", &chunkSize)
 				if err != nil {
 					fmt.Printf("Foo: %d, %s", n1, string(buf[pos:pos+10]))
@@ -144,6 +153,8 @@ func (t *transportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 				numDigits := len(strconv.Itoa(chunkSize))
 				var extraChars = 10 - numDigits - 3
 				copy(buf[pos:], buf[pos+numDigits+3:pos+10])
+
+				// @@@ Doesn't this mean the extra chars will be missed off when copied into 'out' below?
 				pos = pos + extraChars
 
 				if pos+chunkSize-extraChars > cap(buf) {
