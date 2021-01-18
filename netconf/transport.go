@@ -131,30 +131,41 @@ func (t *transportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 		if t.version == "v1.1" {
 			var chunkSize int
 
-			n1, err = io.ReadAtLeast(t.ReadWriteCloser, buf[pos:pos+10], len(msgSeperator_v11))
+			// Try to read either the chunk header (incl. chunk size) or the
+			// msg seperator.
+			// Max is 10 digits, plus two newlines and the hash char.
+			const maxHdrLen = 13
+			n1, err = io.ReadAtLeast(t.ReadWriteCloser, buf[pos:pos+maxHdrLen], len(msgSeperator_v11))
 
-			// @@@ If we do this check here, not much point in checking again by calling f()!
-			if n1 == len(msgSeperator_v11) && string(buf[pos:pos+n1]) == msgSeperator_v11 {
+			if err != nil {
+				if err != io.EOF {
+					return nil, err
+				}
+				break
+			} else if n1 == len(msgSeperator_v11) && string(buf[pos:pos+n1]) == msgSeperator_v11 {
 				n = n1
 			} else {
-				if n1 < 10 {
+				if n1 < maxHdrLen {
 					// Read the rest
-					n2, err := io.ReadFull(t.ReadWriteCloser, buf[pos+n1:pos+10])
-					if err != nil || n1+n2 != 10 {
-						panic(true)
+					n2, err := io.ReadFull(t.ReadWriteCloser, buf[pos+n1:pos+maxHdrLen])
+					if err != nil {
+						if err != io.EOF {
+							return nil, err
+						}
+						if n1+n2 != maxHdrLen {
+							return nil, fmt.Errorf("Failed to read expected chunk header: %d", maxHdrLen)
+						}
 					}
-					n1 = 10
+					n1 = maxHdrLen
 				}
-				_, err = fmt.Sscanf(string(buf[pos:pos+10]), "\n#%d\n", &chunkSize)
+				_, err = fmt.Sscanf(string(buf[pos:pos+maxHdrLen]), "\n#%d\n", &chunkSize)
 				if err != nil {
-					fmt.Printf("Foo: %d, %s", n1, string(buf[pos:pos+10]))
-					panic(err)
+					return nil, err
 				}
 				numDigits := len(strconv.Itoa(chunkSize))
-				var extraChars = 10 - numDigits - 3
-				copy(buf[pos:], buf[pos+numDigits+3:pos+10])
+				var extraChars = maxHdrLen - numDigits - 3
+				copy(buf[pos:], buf[pos+numDigits+3:pos+maxHdrLen])
 
-				// @@@ Doesn't this mean the extra chars will be missed off when copied into 'out' below?
 				pos = pos + extraChars
 
 				if pos+chunkSize-extraChars > cap(buf) {
@@ -163,8 +174,10 @@ func (t *transportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 				n, err = io.ReadFull(t.ReadWriteCloser, buf[pos:pos+chunkSize-extraChars])
 
 				if n < chunkSize-extraChars {
+					// We know the chunk size, so this should only happen if
+					// there's a connection error.
 					fmt.Printf("Not enough characters: %d %d pos: %d, err: %v\n", n, chunkSize-extraChars, pos, err)
-					panic("Not enough characters")
+					return nil, fmt.Errorf("Failed to read expected chunk size: %d", chunkSize)
 				}
 			}
 		} else {
