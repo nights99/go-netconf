@@ -176,7 +176,6 @@ func (t *transportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 				if n < chunkSize-extraChars {
 					// We know the chunk size, so this should only happen if
 					// there's a connection error.
-					fmt.Printf("Not enough characters: %d %d pos: %d, err: %v\n", n, chunkSize-extraChars, pos, err)
 					return nil, fmt.Errorf("Failed to read expected chunk size: %d", chunkSize)
 				}
 			}
