@@ -171,7 +171,33 @@ func (t *TransportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 				if pos+chunkSize-extraChars > cap(buf) {
 					buf = append(buf, make([]byte, pos+chunkSize-extraChars)...)
 				}
-				n, err = io.ReadFull(t.ReadWriteCloser, buf[pos:pos+chunkSize-extraChars])
+				if chunkSize > extraChars {
+					// Read the chunk
+					n, err = io.ReadFull(t.ReadWriteCloser, buf[pos:pos+chunkSize-extraChars])
+				} else {
+					// Small chunk which we've already read.
+					// We advanced too far, go back to where the next chunk header is (back extraChars, forward chunkSize)
+					pos = pos - extraChars + chunkSize
+					// This now points to the next chunk size header
+					// @@@ Don't really want to repeat this all from above, but have had to change refs to maxHdrLen
+					var extraChars = extraChars - chunkSize
+					_, err = fmt.Sscanf(string(buf[pos:pos+(maxHdrLen-chunkSize)]), "\n#%d\n", &chunkSize)
+					if err != nil {
+						fmt.Printf("Foo: %d, %s\n", n1, string(buf[pos:pos+maxHdrLen]))
+						// panic(err)
+						return nil, err
+					}
+					numDigits := len(strconv.Itoa(chunkSize))
+					// panic("Foo")
+					extraChars = extraChars - numDigits - 3
+					copy(buf[pos:], buf[pos+numDigits+3:pos+numDigits+3+extraChars])
+					pos = pos + extraChars
+					// @@@ Check capacity
+					// @@@ Check chunkSize > extraChars
+					n, err = io.ReadFull(t.ReadWriteCloser, buf[pos:pos+chunkSize-extraChars])
+					// panic("Foo")
+				}
+				// fmt.Printf("Read %d %s", n, string(buf[pos:pos+chunkSize-extraChars]))
 
 				if n < chunkSize-extraChars {
 					// We know the chunk size, so this should only happen if
@@ -210,7 +236,7 @@ func (t *TransportBasicIO) WaitForFunc(f func([]byte) (int, error)) ([]byte, err
 		}
 	}
 
-	return nil, fmt.Errorf("WaitForFunc failed")
+	return nil, fmt.Errorf("WaitForFunc failed: %v", buf)
 }
 
 func (t *TransportBasicIO) WaitForBytes(b []byte) ([]byte, error) {
